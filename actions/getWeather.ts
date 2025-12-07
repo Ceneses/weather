@@ -2,65 +2,75 @@
 
 import { WeatherData } from "@/types/weather";
 
-export async function getWeather(city: string): Promise<{ data?: WeatherData; error?: string }> {
+// 1. 增加 lang 参数，默认 'zh'
+export async function getWeather(city: string, lang: string = "zh"): Promise<{ data?: WeatherData; error?: string }> {
     const apiKey = process.env.OPENWEATHER_API_KEY;
 
-    // 注意：此处不需要修改 .env，Geocoding API 和 Weather API 使用同一个 Key
-    // 但我们需要 Geocoding 的 API 地址
     const geoUrlBase = "https://api.openweathermap.org/geo/1.0/direct";
     const weatherUrlBase = "https://api.openweathermap.org/data/2.5/weather";
 
+    // 辅助变量：是否为中文环境
+    const isZh = lang === "zh";
+
     if (!city) {
-        return { error: "请输入城市名称" };
+        return { error: isZh ? "请输入城市名称" : "Please enter a city name" };
     }
 
     try {
         // --- 第一步：通过 Geocoding API 获取经纬度 ---
-        // limit=1 表示只取匹配度最高的那一个
         const geoRes = await fetch(
             `${geoUrlBase}?q=${encodeURIComponent(city)}&limit=1&appid=${apiKey}`,
             { cache: 'no-store' }
         );
 
         if (!geoRes.ok) {
-            return { error: "地理位置服务暂时不可用" };
+            return { error: isZh ? "地理位置服务暂时不可用" : "Geocoding service unavailable" };
         }
 
         const geoData = await geoRes.json();
 
-        // 如果数组为空，说明没找到这个中文城市
+        // 没找到城市
         if (!geoData || geoData.length === 0) {
-            return { error: "未找到该城市，请尝试输入完整的城市名（如：北京市）" };
+            return {
+                error: isZh
+                    ? "未找到该城市，请尝试输入完整的城市名（如：北京市）"
+                    : "City not found, please try the full name (e.g., London)"
+            };
         }
 
-        // 获取经纬度和英文名（API有时返回local_names，但这里主要取坐标）
         const { lat, lon, local_names, name } = geoData[0];
 
-        // 优先显示中文名，如果没有则显示默认名
-        const cityName = local_names?.zh || name;
-
+        // 2. 根据语言选择城市显示名称
+        // 如果是中文模式，优先取 zh；如果是英文模式，优先取 en，没有 en 就取默认 name
+        let cityName = name;
+        if (isZh) {
+            cityName = local_names?.zh || name;
+        } else {
+            cityName = local_names?.en || name;
+        }
 
         // --- 第二步：通过经纬度获取天气数据 ---
-        // 使用 lat 和 lon 查询，比直接用名字查询更精准
+        // 3. 转换 API 需要的语言代码 (OpenWeatherMap 中文是 zh_cn, 英文是 en)
+        const apiLang = isZh ? "zh_cn" : "en";
+
         const weatherRes = await fetch(
-            `${weatherUrlBase}?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=zh_cn`,
+            `${weatherUrlBase}?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=${apiLang}`,
             { cache: 'no-store' }
         );
 
         if (!weatherRes.ok) {
-            return { error: "获取天气数据失败" };
+            return { error: isZh ? "获取天气数据失败" : "Failed to fetch weather data" };
         }
 
         const weatherData: WeatherData = await weatherRes.json();
 
-        // 将 Geocoding 获取到的更准确的中文名覆盖回去（可选，为了显示更好看）
-        // OpenWeatherMap 的 Weather 接口返回的 name 经常是拼音或英文
+        // 将 Geocoding 获取到的本地化城市名覆盖回去
         weatherData.name = cityName;
 
         return { data: weatherData };
 
     } catch (error) {
         console.error("API Error:", error);
-        return { error: "网络连接错误" };
+        return { error: isZh ? "网络连接错误" : "Network connection error" };
     }
 }
